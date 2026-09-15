@@ -1,0 +1,28 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "isolated": true,
+    "launchOptions": {
+      "channel": "chromium",
+      "headless": true
+    },
+    "contextOptions": {
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "deviceScaleFactor": 1,
+      "colorScheme": "light",
+      "reducedMotion": "reduce",
+      "locale": "en-US",
+      "timezoneId": "UTC",
+      "serviceWorkers": "block"
+    }
+  },
+  "imageResponses": "omit",
+  "codegen": "none",
+  "timeouts": {
+    "action": 10000,
+    "navigation": 30000
+  }
+}

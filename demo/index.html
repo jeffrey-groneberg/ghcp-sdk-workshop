@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Orbit - workshop demo</title>
+    <style>
+      body { margin: 0; background: #f5f7fb; color: #172238; font: 20px/1.5 Arial, sans-serif; }
+      main { max-width: 960px; margin: 64px auto; padding: 32px; }
+      h1 { margin: 0; font-size: 48px; }
+      h2 { margin-top: 0; }
+      .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 40px; }
+      section { padding: 32px; background: white; border: 1px solid #ccd5e2; border-radius: 12px; }
+      .price { font-size: 36px; font-weight: bold; }
+      svg { display: block; margin: 20px auto; }
+      footer { margin-top: 40px; color: #46556c; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Orbit</h1>
+      <p>A small, predictable page for our change-monitoring agent.</p>
+      <div class="cards">
+        <section>
+          <h2>Starter plan</h2>
+          <p class="price">$19 / month</p>
+          <p>Includes 5 projects and email support.</p>
+        </section>
+        <section>
+          <h2>Launch marker</h2>
+          <svg width="200" height="180" viewBox="0 0 200 180" role="img" aria-label="Launch marker">
+            <circle cx="100" cy="90" r="70" fill="#2563eb"/>
+            <path d="M65 110 L100 45 L135 110 L100 95 Z" fill="white"/>
+          </svg>
+        </section>
+      </div>
+      <footer>No timestamps, ads, cookies, or external assets. Edit this file to introduce a change.</footer>
+    </main>
+  </body>
+</html>
