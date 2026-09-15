@@ -9,6 +9,16 @@ This is an **agent loop**, not a Python script that captures a page and asks AI 
 **You will edit:** [`starter.py`](starter.py). **Working solution:** [`watch.py`](watch.py).
 The supplied [`workshop_support.py`](workshop_support.py) handles storage and guards so the workshop can focus on the SDK.
 
+## Join the workshop
+
+Scan the QR code to open [jeffrey-groneberg/ghcp-sdk-workshop](https://github.com/jeffrey-groneberg/ghcp-sdk-workshop) on your own device.
+
+<a href="assets/repository-qr.png">
+  <img src="assets/repository-qr.png" alt="QR code for the jeffrey-groneberg/ghcp-sdk-workshop repository" width="450">
+</a>
+
+[Open the full-size QR code for projection](assets/repository-qr.png).
+
 ## Before the workshop
 
 You need access to this repository, permission to create a Codespace, and a GitHub account with **Copilot CLI and a compatible vision model enabled**. Codespaces and Copilot usage are subject to your account's allowances and organization policies.
