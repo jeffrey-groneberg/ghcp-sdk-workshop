@@ -6,7 +6,8 @@
       "version": "22",
       "pnpmVersion": "none"
     },
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/sshd:1": {}
   },
   "containerUser": "vscode",
   "remoteUser": "vscode",

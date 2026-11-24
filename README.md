@@ -326,7 +326,7 @@ python -m unittest discover -s tests -v
 npm run test:mcp
 ```
 
-The Python tests cover sign-in, tool configuration, permissions, session resume, and persistence without model calls. The MCP check starts the real installed server and verifies a full-page Chromium screenshot. Neither substitutes for observing the live agent's visual reasoning.
+The Python tests cover sign-in, tool configuration, permissions, session resume, and persistence without model calls. The MCP check starts the real installed server and verifies a full-page Chromium screenshot. Neither substitutes for observing the live agent's visual reasoning. The dev container includes an SSH server, so organizers can also run these checks in a Codespace from their own terminal with `gh codespace ssh`.
 
 </details>
 
