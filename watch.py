@@ -30,7 +30,6 @@ from workshop_support import (
     ToolGuard,
     WorkshopError,
     copilot_home,
-    github_token,
     open_run,
 )
 
@@ -91,17 +90,18 @@ def comparison_model(model: Model) -> bool:
 
 
 def new_client(output: Path) -> CopilotClient:
+    # No github option: the SDK's credential order picks the identity (see README).
     return CopilotClient(
         mode="empty",
         runtime=RuntimeConnection.for_default(base_directory=str(copilot_home(output))),
-        github={"token": github_token()},
     )
 
 
 async def available_models(client: CopilotClient) -> list[Model]:
     auth = await client.get_auth_status()
     if not auth.is_authenticated:
-        raise WorkshopError(f"GitHub did not accept the sign-in. {SIGN_IN}")
+        raise WorkshopError(f"Not signed in to GitHub Copilot. {SIGN_IN}")
+    print(f"Signed in as {auth.login} ({auth.auth_type})", file=sys.stderr)
     models = [model for model in await client.list_models() if comparison_model(model)]
     if not models:
         raise WorkshopError("Your account has no available PNG/two-image vision models.")

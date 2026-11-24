@@ -7,7 +7,7 @@ A **60-minute Python workshop** on **Microsoft Copilot SDK 2.0** (formerly GitHu
 This is an **agent loop**, not a Python script that captures a page and asks AI to summarize it. The agent chooses the tool calls and makes the comparison decision. Your application supplies capabilities, access boundaries, a cost cap, and durable output.
 
 **You will edit:** [`starter.py`](starter.py). **Working solution:** [`watch.py`](watch.py).
-The supplied [`workshop_support.py`](workshop_support.py) handles sign-in, storage, and guards so the workshop can focus on the SDK.
+The supplied [`workshop_support.py`](workshop_support.py) handles storage and guards so the workshop can focus on the SDK.
 
 ## Join the workshop
 
@@ -35,16 +35,22 @@ Scan the QR code to open [jeffrey-groneberg/ghcp-sdk-workshop](https://github.co
 You need access to this repository, permission to create a Codespace, and a GitHub account with **GitHub Copilot and a compatible vision model enabled**. Codespaces and Copilot usage are subject to your account's allowances and organization policies.
 
 1. Open the Codespaces button and let setup finish. The container installs Python 3.12, Node 22, the GitHub CLI, the pinned SDK and Playwright MCP packages, the SDK runtime, Chromium and its Linux libraries. No local installation is needed.
-2. In the Codespaces terminal, sign in with **your own account** and check your models:
+2. In the Codespaces terminal, check that the watcher reaches GitHub Copilot as **you**:
 
    ```bash
-   env -u GITHUB_TOKEN -u GH_TOKEN gh auth login --web --git-protocol https
    python watch.py --list-models
    ```
 
-   Copy the one-time code and approve it in the browser. If asked to authenticate Git, answer **No**: Codespaces already manages Git. The second command lists the models available to you with PNG and two-image support, without running the agent. The workshop defaults to `claude-haiku-4.5`; use `--model NAME` if needed.
+   No login step is needed: a Codespace's `GITHUB_TOKEN` belongs to its owner, so the SDK signs in with your own Copilot access. The command prints the account it used, for example `Signed in as <you> (env)`, and lists the models available to you with PNG and two-image support, without running the agent. The workshop defaults to `claude-haiku-4.5`; use `--model NAME` if needed.
 
-The watcher runs as **you**. [`workshop_support.py`](workshop_support.py) reads your GitHub CLI login and passes it to the SDK as an explicit token (`github={"token": ...}`), so the runtime never falls back to ambient tokens such as the Codespaces repository `GITHUB_TOKEN`, which has no Copilot access. `env -u` removes those variables only for the login command; it does **not** change Git credentials or your environment. To use a token instead, set `COPILOT_GITHUB_TOKEN`, for example as a [Codespaces secret](https://docs.github.com/en/codespaces/managing-your-codespaces/managing-your-account-specific-secrets-for-github-codespaces), to a fine-grained personal access token owned by your personal account with the **Copilot Requests** permission.
+The SDK picks its identity in this order: `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, a stored GitHub Copilot CLI login, then the GitHub CLI login. If the Codespace token is refused, for example by an organization policy, sign in with the GitHub CLI and run the watcher without the Codespace token:
+
+```bash
+env -u GITHUB_TOKEN -u GH_TOKEN gh auth login --web --git-protocol https
+env -u GITHUB_TOKEN -u GH_TOKEN python watch.py --list-models
+```
+
+Copy the one-time code and approve it in the browser. If asked to authenticate Git, answer **No**: Codespaces already manages Git. Keep the `env -u` prefix on every watcher command; it removes the variables only for that command and does **not** change Git credentials or your environment. Alternatively, set `COPILOT_GITHUB_TOKEN`, for example as a [Codespaces secret](https://docs.github.com/en/codespaces/managing-your-codespaces/managing-your-account-specific-secrets-for-github-codespaces), to a fine-grained personal access token owned by your personal account with the **Copilot Requests** permission.
 
 Never share tokens, `~/.config/gh`, or `.webwatch/copilot-home`. In a container without an OS credential store, the GitHub CLI keeps its login in `~/.config/gh`. Setup never signs in for you or makes a model request.
 
@@ -66,7 +72,7 @@ gh auth login
 python watch.py --list-models
 ```
 
-Skip `gh auth login` if `gh auth status` already shows your account. On Linux/WSL, install browser system libraries with `npm run browser:install -- --with-deps` instead. The support code uses POSIX file locking, so native Windows users should use Codespaces or WSL.
+Skip `gh auth login` if `gh auth status` already shows your account. If `GH_TOKEN` or `GITHUB_TOKEN` is set in your shell, the SDK uses it first; check the `Signed in as` line. On Linux/WSL, install browser system libraries with `npm run browser:install -- --with-deps` instead. The support code uses POSIX file locking, so native Windows users should use Codespaces or WSL.
 
 </details>
 
@@ -161,7 +167,7 @@ Read the short `execute()` function in `watch.py`. Its central operation is one:
 await session.send_and_wait(prompt, timeout=args.timeout)
 ```
 
-**Why:** the SDK performs the intermediate tool calls and feeds their results back to the model. The runner manages sign-in, resource cleanup, cost reporting, and publication, not the browsing sequence.
+**Why:** the SDK performs the intermediate tool calls and feeds their results back to the model. The runner checks the sign-in and manages resource cleanup, cost reporting, and publication, not the browsing sequence.
 
 The client is created once per run:
 
@@ -169,11 +175,10 @@ The client is created once per run:
 CopilotClient(
     mode="empty",
     runtime=RuntimeConnection.for_default(base_directory=str(copilot_home(output))),
-    github={"token": github_token()},
 )
 ```
 
-SDK 2.0 has no default mode. `mode="empty"` enables only what each session opts into, avoiding inherited skills, file hooks, and cross-session memory, and it requires its own storage: session journals go to `.webwatch/copilot-home`, not your personal `~/.copilot`. `RuntimeConnection.for_default` loads the runtime into the watcher's own Python process, the 2.0 default. `github.token` is the identity described in *Before the workshop*.
+SDK 2.0 has no default mode. `mode="empty"` enables only what each session opts into, avoiding inherited skills, file hooks, and cross-session memory, and it requires its own storage: session journals go to `.webwatch/copilot-home`, not your personal `~/.copilot`. `RuntimeConnection.for_default` loads the runtime into the watcher's own Python process, the 2.0 default. Without a `github` option, the runtime signs in through the credential order described in *Before the workshop*; a service acting for many users would pass `github={"token": ...}` instead.
 
 ### 4. Observe the complete loop
 
@@ -244,7 +249,7 @@ An interrupted or incomplete run does not advance `latest.json`. Screenshot file
 
 ### 6. Review the boundaries and stop
 
-**Who does what?** The model chooses actions and interprets images; MCP implements browser operations; the SDK's runtime runs the agent loop inside your Python process; application code chooses the identity, validates capabilities, caps the cost, and saves the result.
+**Who does what?** The model chooses actions and interprets images; MCP implements browser operations; the SDK's runtime runs the agent loop inside your Python process and signs in through its credential order; application code validates capabilities, caps the cost, and saves the result.
 
 This is **semantic visual comparison**, not a deterministic visual-regression test. Small details may be missed, and dynamic content may cause false positives. The fixture has no ads, animation, external assets, or changing timestamps so the exercise is repeatable.
 
@@ -307,7 +312,7 @@ Record a baseline, change the page, and run again with the other model. Its own 
 | Symptom | Action |
 | --- | --- |
 | Setup did not finish | Read the creation log and rerun `bash .devcontainer/post-create.sh`. Do not disable TLS verification to work around network errors. |
-| `No GitHub CLI login found` or `GitHub did not accept the sign-in` | Sign in with your own account as shown in *Before the workshop*, then run `python watch.py --list-models`. Alternatively, set `COPILOT_GITHUB_TOKEN`. |
+| `Not signed in to GitHub Copilot`, or `Signed in as` shows the wrong account | Use the GitHub CLI fallback from *Before the workshop* with the `env -u GITHUB_TOKEN -u GH_TOKEN` prefix, or set `COPILOT_GITHUB_TOKEN`. Then run `python watch.py --list-models` again. |
 | `gh auth login` says the `GITHUB_TOKEN` value is being used | Prefix the command with `env -u GITHUB_TOKEN -u GH_TOKEN`, as shown above. |
 | Model access fails | Choose an enabled model from `python watch.py --list-models` with `--model NAME`; resolve organization restrictions with your organizer. |
 | The screenshot shows GitHub sign-in | Use `http://127.0.0.1:8000/` inside the Codespace, not the external forwarded URL. |

@@ -12,9 +12,8 @@ import platform
 import re
 import shutil
 import struct
-import subprocess
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -64,9 +63,10 @@ MAX_IMAGE_BYTES = 3 * 1024 * 1024
 MAX_TOOL_CALLS = 24
 MAX_AI_CREDITS = 30.0  # The smallest session limit the runtime accepts.
 SIGN_IN = (
-    "Sign in with your own GitHub account: gh auth login "
-    "(in Codespaces: env -u GITHUB_TOKEN -u GH_TOKEN gh auth login), "
-    "or set COPILOT_GITHUB_TOKEN."
+    "In a Codespace, its own GITHUB_TOKEN signs you in. Otherwise, or if that is refused, "
+    "sign in with the GitHub CLI and run the watcher without other tokens: "
+    "env -u GITHUB_TOKEN -u GH_TOKEN gh auth login, then "
+    "env -u GITHUB_TOKEN -u GH_TOKEN python watch.py ... Or set COPILOT_GITHUB_TOKEN."
 )
 Observation = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
 
@@ -113,31 +113,6 @@ def normalize_url(value: str) -> str:
     if parts.username is not None or parts.password is not None or port == 0:
         raise WorkshopError("Use a URL without embedded credentials and with a valid port.")
     return urlunsplit(parts._replace(path=parts.path or "/"))
-
-
-def github_token(environ: Mapping[str, str] = os.environ) -> str:
-    """Return the attendee's own token: COPILOT_GITHUB_TOKEN, else the GitHub CLI login.
-
-    Ambient GH_TOKEN/GITHUB_TOKEN values, such as the Codespaces repository token, are
-    never used: gh runs without them and therefore reads its stored login.
-    """
-    if token := environ.get("COPILOT_GITHUB_TOKEN", "").strip():
-        return token
-    gh = shutil.which("gh", path=environ.get("PATH"))
-    if gh is None:
-        raise WorkshopError(f"The GitHub CLI (gh) is missing. {SIGN_IN}")
-    child = {key: value for key, value in environ.items() if key not in {"GH_TOKEN", "GITHUB_TOKEN"}}
-    try:
-        result = subprocess.run(
-            [gh, "auth", "token", "--hostname", "github.com"],
-            env=child, capture_output=True, text=True, timeout=30, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise WorkshopError(f"Could not read the GitHub CLI login ({error}). {SIGN_IN}") from error
-    token = result.stdout.strip()
-    if result.returncode != 0 or not token:
-        raise WorkshopError(f"No GitHub CLI login found. {SIGN_IN}")
-    return token
 
 
 def copilot_home(output: Path) -> Path:

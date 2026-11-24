@@ -26,7 +26,6 @@ from workshop_support import (
     ToolGuard,
     WorkshopError,
     atomic_write,
-    github_token,
     image_digest,
     normalize_url,
     open_run,
@@ -364,22 +363,21 @@ class WatchTests(unittest.TestCase):
             with self.assertRaisesRegex(WorkshopError, "tool limit"):
                 run.validate_result(FinishRunParams(status="baseline", summary="First."))
 
-    def test_sign_in_uses_an_explicit_token_or_the_gh_login_never_ambient_tokens(self):
-        ambient = {"PATH": "/usr/bin", "CODESPACES": "true", "GITHUB_TOKEN": "repo", "GH_TOKEN": "repo2"}
-        self.assertEqual(github_token({**ambient, "COPILOT_GITHUB_TOKEN": " explicit "}), "explicit")
-        signed_in = SimpleNamespace(returncode=0, stdout="personal\n")
-        with patch("workshop_support.shutil.which", return_value="/usr/bin/gh"), patch(
-            "workshop_support.subprocess.run", return_value=signed_in
-        ) as gh:
-            self.assertEqual(github_token(ambient), "personal")
-        self.assertNotIn("GITHUB_TOKEN", gh.call_args.kwargs["env"])
-        self.assertNotIn("GH_TOKEN", gh.call_args.kwargs["env"])
-        self.assertEqual(ambient["GITHUB_TOKEN"], "repo")
-        for path, result in ((None, signed_in), ("/usr/bin/gh", SimpleNamespace(returncode=1, stdout=""))):
-            with self.subTest(path=path), patch("workshop_support.shutil.which", return_value=path), patch(
-                "workshop_support.subprocess.run", return_value=result
-            ), self.assertRaisesRegex(WorkshopError, "gh auth login"):
-                github_token(ambient)
+    def test_sign_in_reports_the_account_or_explains_the_fallback(self):
+        refused = SimpleNamespace(is_authenticated=False, login=None, auth_type=None)
+        client = SimpleNamespace(
+            get_auth_status=AsyncMock(return_value=refused),
+            list_models=AsyncMock(return_value=[vision_model()]),
+        )
+        with self.assertRaisesRegex(WorkshopError, "env -u GITHUB_TOKEN -u GH_TOKEN gh auth login"):
+            asyncio.run(watch.available_models(client))
+        client.list_models.assert_not_called()
+        client.get_auth_status.return_value = SimpleNamespace(is_authenticated=True, login="octocat", auth_type="env")
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            models = asyncio.run(watch.available_models(client))
+        self.assertEqual([model.id for model in models], ["test"])
+        self.assertIn("Signed in as octocat (env)", errors.getvalue())
 
     def test_model_filter_requires_enabled_png_vision_with_two_images(self):
         self.assertTrue(watch.comparison_model(vision_model()))

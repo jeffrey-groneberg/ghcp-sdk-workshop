@@ -18,6 +18,6 @@ npm run browser:install -- --with-deps
 printf '\nPrefetching the Microsoft Copilot SDK runtime (no sign-in or model request)...\n'
 .venv/bin/python -m copilot download-runtime --in-process
 
-printf '\nWorkshop setup complete. Sign in with your own account:\n'
-printf '  env -u GITHUB_TOKEN -u GH_TOKEN gh auth login --web --git-protocol https\n'
+printf '\nWorkshop setup complete. Check your Copilot access (no login needed in a Codespace):\n'
+printf '  python watch.py --list-models\n'
 printf 'Then start the local fixture with: npm run demo\n'
