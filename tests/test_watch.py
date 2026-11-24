@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from copilot import ToolInvocation
+from copilot import ModelPolicyState, ToolInvocation
 from copilot.rpc import PermissionDecisionApproveOnce, PermissionDecisionReject
 from copilot.session_events import PermissionRequestMcp, PermissionRequestRead
 from pydantic import ValidationError
@@ -26,7 +26,7 @@ from workshop_support import (
     ToolGuard,
     WorkshopError,
     atomic_write,
-    copilot_environment,
+    github_token,
     image_digest,
     normalize_url,
     open_run,
@@ -78,6 +78,50 @@ async def finish(run, status, changes=None, summary="Observed the page."):
             arguments={"status": status, "summary": summary, "changes": changes or []},
         )
     )
+
+
+def vision_model(state=ModelPolicyState.ENABLED, images=5, media=("image/png",), vision=True):
+    return SimpleNamespace(
+        id="test",
+        policy=None if state is None else SimpleNamespace(state=state),
+        capabilities=SimpleNamespace(
+            supports=SimpleNamespace(vision=vision),
+            limits=SimpleNamespace(vision=SimpleNamespace(
+                max_prompt_images=images,
+                max_prompt_image_size=3 * 1024 * 1024,
+                supported_media_types=list(media),
+            )),
+        ),
+    )
+
+
+def fake_client():
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    return client
+
+
+def fake_session(session_id="session-1", credits=(0.0, 2.5)):
+    session = AsyncMock()
+    session.__aenter__.return_value = session
+    session.session_id = session_id
+    session.rpc.usage.get_metrics.side_effect = [
+        SimpleNamespace(total_nano_aiu=value * 1e9, ai_credits_status=SimpleNamespace(value="complete"))
+        for value in credits
+    ]
+    return session
+
+
+def run_args(output, **overrides):
+    values = dict(url=URL, output=output, model="test", timeout=10, list_models=False, max_credits=30.0, remember=False)
+    return argparse.Namespace(**{**values, **overrides})
+
+
+def execute(args, factory, client=None):
+    with patch("watch.new_client", return_value=client or fake_client()), patch(
+        "watch.available_models", new=AsyncMock(return_value=[vision_model()])
+    ):
+        asyncio.run(watch.execute(args, factory, watch.TASK))
 
 
 class WatchTests(unittest.TestCase):
@@ -320,14 +364,33 @@ class WatchTests(unittest.TestCase):
             with self.assertRaisesRegex(WorkshopError, "tool limit"):
                 run.validate_result(FinishRunParams(status="baseline", summary="First."))
 
-    def test_codespaces_auth_override_is_process_scoped(self):
-        environment = {"CODESPACES": "true", "GITHUB_TOKEN": "repo", "GH_TOKEN": "repo2", "COPILOT_GITHUB_TOKEN": "explicit"}
-        child = copilot_environment(environment)
-        self.assertEqual(child["GITHUB_TOKEN"], "")
-        self.assertEqual(child["GH_TOKEN"], "")
-        self.assertEqual(child["COPILOT_GITHUB_TOKEN"], "explicit")
-        self.assertEqual(environment["GITHUB_TOKEN"], "repo")
-        self.assertEqual(copilot_environment({"GH_TOKEN": "personal"}), {"GH_TOKEN": "personal"})
+    def test_sign_in_uses_an_explicit_token_or_the_gh_login_never_ambient_tokens(self):
+        ambient = {"PATH": "/usr/bin", "CODESPACES": "true", "GITHUB_TOKEN": "repo", "GH_TOKEN": "repo2"}
+        self.assertEqual(github_token({**ambient, "COPILOT_GITHUB_TOKEN": " explicit "}), "explicit")
+        signed_in = SimpleNamespace(returncode=0, stdout="personal\n")
+        with patch("workshop_support.shutil.which", return_value="/usr/bin/gh"), patch(
+            "workshop_support.subprocess.run", return_value=signed_in
+        ) as gh:
+            self.assertEqual(github_token(ambient), "personal")
+        self.assertNotIn("GITHUB_TOKEN", gh.call_args.kwargs["env"])
+        self.assertNotIn("GH_TOKEN", gh.call_args.kwargs["env"])
+        self.assertEqual(ambient["GITHUB_TOKEN"], "repo")
+        for path, result in ((None, signed_in), ("/usr/bin/gh", SimpleNamespace(returncode=1, stdout=""))):
+            with self.subTest(path=path), patch("workshop_support.shutil.which", return_value=path), patch(
+                "workshop_support.subprocess.run", return_value=result
+            ), self.assertRaisesRegex(WorkshopError, "gh auth login"):
+                github_token(ambient)
+
+    def test_model_filter_requires_enabled_png_vision_with_two_images(self):
+        self.assertTrue(watch.comparison_model(vision_model()))
+        self.assertTrue(watch.comparison_model(vision_model(state=None)))
+        for model in (
+            vision_model(state=ModelPolicyState.DISABLED),
+            vision_model(images=1),
+            vision_model(media=("image/jpeg",)),
+            vision_model(vision=False),
+        ):
+            self.assertFalse(watch.comparison_model(model))
 
     def test_invalid_urls_fail_early(self):
         for url in ("file:///tmp/page", "https://name:password@example.com", "http://host:bad", "http://ho st/", "\nhttp://host"):
@@ -337,24 +400,69 @@ class WatchTests(unittest.TestCase):
 
     def test_session_connects_only_selected_capabilities(self):
         with open_run(URL, self.output) as run:
+            guard = ToolGuard(run)
             client = SimpleNamespace(create_session=AsyncMock())
-            asyncio.run(watch.build_session(client, run, ToolGuard(run), "model"))
+            asyncio.run(watch.build_session(client, run, guard, "model"))
             options = client.create_session.call_args.kwargs
             self.assertEqual(
-                set(options["available_tools"].to_list()),
+                set(options["tools"]["available_tools"].to_list()),
                 {"builtin:view", "custom:finish_run", *[f"mcp:playwright-{name}" for name in MCP_TOOLS]},
             )
-            server = options["mcp_servers"]["playwright"]
+            self.assertEqual(options["tools"]["definitions"][0].name, "finish_run")
+            self.assertTrue(options["tools"]["definitions"][0].is_terminal)
+            server = options["mcp"]["servers"]["playwright"]
             self.assertEqual(server["tools"], MCP_TOOLS)
             self.assertEqual(server["working_directory"], str(run.directory))
             self.assertTrue(Path(server["args"][0]).is_file())
-            self.assertEqual(options["tools"][0].name, "finish_run")
+            self.assertEqual(options["permissions"]["on_request"], guard.permission)
+            self.assertEqual(options["hooks"]["handlers"].keys(), guard.hooks().keys())
+            self.assertEqual(options["execution"]["limits"]["max_ai_credits"], run.max_ai_credits)
+
+    def test_remember_resumes_the_previous_session_by_id(self):
+        with open_run(URL, self.output) as run:
+            run.session_id = "session-1"
+            capture_and_inspect(run)
+            asyncio.run(finish(run, "baseline"))
+            run.publish()
+        with open_run(URL, self.output) as run:
+            self.assertIsNone(run.resume_session_id)
+        with open_run(URL, self.output, remember=True) as run:
+            self.assertEqual(run.resume_session_id, "session-1")
+            client = SimpleNamespace(create_session=AsyncMock(), resume_session=AsyncMock())
+            asyncio.run(watch.build_session(client, run, ToolGuard(run), "model"))
+            client.create_session.assert_not_called()
+            self.assertEqual(client.resume_session.call_args.args, ("session-1",))
+            self.assertIn("tools", client.resume_session.call_args.kwargs)
+
+    def test_remember_requires_a_session_factory_that_resumes(self):
+        with open_run(URL, self.output) as run:
+            run.session_id = "session-1"
+            capture_and_inspect(run)
+            asyncio.run(finish(run, "baseline"))
+            run.publish()
+        session = fake_session(session_id="new-session")
+
+        async def factory(*_args):
+            return session
+
+        with self.assertRaisesRegex(WorkshopError, "resume"):
+            execute(run_args(self.output, remember=True), factory)
+        session.send_and_wait.assert_not_called()
+
+    def test_credits_report_separates_this_run_from_a_resumed_session(self):
+        self.assertEqual(watch.credits_line(None, (3.114, "complete"), 30), "AI credits: 3.11 this run (cap 30)")
+        self.assertEqual(
+            watch.credits_line((4.1, "complete"), (6.08, "partial"), 30),
+            "AI credits: at least 1.98 this run, 6.08 in this session (cap 30)",
+        )
+        self.assertEqual(watch.credits_line(None, None, 30), "AI credits: not reported (cap 30)")
 
     def test_readme_exercises_complete_the_supplied_starter(self):
         namespace = {"__name__": "completed_starter"}
         exec(compile((ROOT / "starter.py").read_text(), "starter.py", "exec"), namespace)
+        core = (ROOT / "README.md").read_text().split("\n## Stretch exercises")[0]
         exercises = 0
-        for block in re.findall(r"```python\n(.*?)```", (ROOT / "README.md").read_text(), re.DOTALL):
+        for block in re.findall(r"```python\n(.*?)```", core, re.DOTALL):
             first = ast.parse(block).body[0]
             if isinstance(first, (ast.Assign, ast.FunctionDef, ast.AsyncFunctionDef)):
                 exec(compile(block, "README exercise", "exec"), namespace)
@@ -365,39 +473,35 @@ class WatchTests(unittest.TestCase):
         with open_run(URL, self.output) as run:
             client = SimpleNamespace(create_session=AsyncMock())
             asyncio.run(namespace["build_session"](client, run, ToolGuard(run), "model"))
-            self.assertEqual(client.create_session.call_args.kwargs["tools"][0].name, "finish_run")
+            options = client.create_session.call_args.kwargs
+            self.assertEqual(options["tools"]["definitions"][0].name, "finish_run")
+            self.assertEqual(options["execution"]["limits"]["max_ai_credits"], run.max_ai_credits)
 
     def test_turn_and_client_cleanup_failures_preserve_state(self):
         latest = self.baseline()
         old = latest.read_bytes()
         for failure in ("turn", "cleanup"):
             with self.subTest(failure=failure):
-                client = AsyncMock()
-                client.__aenter__.return_value = client
+                client = fake_client()
                 if failure == "cleanup":
                     client.__aexit__.side_effect = WorkshopError("cleanup failed")
-                model = SimpleNamespace(
-                    id="test",
-                    capabilities=SimpleNamespace(limits=SimpleNamespace(
-                        vision=SimpleNamespace(max_prompt_image_size=3 * 1024 * 1024)
-                    )),
-                )
+
                 async def factory(_client, run, _guard, _model):
-                    session = AsyncMock()
-                    session.__aenter__.return_value = session
+                    session = fake_session()
+
                     async def send(*_args, **_kwargs):
                         capture_and_inspect(run)
                         await finish(run, "unchanged")
                         if failure == "turn":
                             raise WorkshopError("turn failed")
+
                     session.send_and_wait.side_effect = send
                     return session
-                args = argparse.Namespace(url=URL, output=self.output, model="test", timeout=10, list_models=False)
-                with patch("watch.new_client", return_value=client), patch(
-                    "watch.available_models", new=AsyncMock(return_value=[model])
-                ):
-                    with self.assertRaises(WorkshopError):
-                        asyncio.run(watch.execute(args, factory, watch.TASK))
+
+                output = io.StringIO()
+                with redirect_stdout(output), self.assertRaises(WorkshopError):
+                    execute(run_args(self.output), factory, client)
+                self.assertIn("AI credits: 2.50 this run (cap 30)", output.getvalue())
                 self.assertEqual(latest.read_bytes(), old)
 
 

@@ -12,6 +12,7 @@ import platform
 import re
 import shutil
 import struct
+import subprocess
 import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -61,6 +62,12 @@ MCP_TOOLS = [
 ]
 MAX_IMAGE_BYTES = 3 * 1024 * 1024
 MAX_TOOL_CALLS = 24
+MAX_AI_CREDITS = 30.0  # The smallest session limit the runtime accepts.
+SIGN_IN = (
+    "Sign in with your own GitHub account: gh auth login "
+    "(in Codespaces: env -u GITHUB_TOKEN -u GH_TOKEN gh auth login), "
+    "or set COPILOT_GITHUB_TOKEN."
+)
 Observation = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
 
 
@@ -90,6 +97,7 @@ class Snapshot(BaseModel):
     captured_at: AwareDatetime
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     status: Literal["baseline", "unchanged", "changed"]
+    session_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,128}$")
 
 
 def normalize_url(value: str) -> str:
@@ -107,12 +115,34 @@ def normalize_url(value: str) -> str:
     return urlunsplit(parts._replace(path=parts.path or "/"))
 
 
-def copilot_environment(environ: Mapping[str, str] = os.environ) -> dict[str, str]:
-    environment = dict(environ)
-    if environment.get("CODESPACES") == "true":
-        # Empty overrides also work when the SDK merges its child environment.
-        environment.update(GH_TOKEN="", GITHUB_TOKEN="")
-    return environment
+def github_token(environ: Mapping[str, str] = os.environ) -> str:
+    """Return the attendee's own token: COPILOT_GITHUB_TOKEN, else the GitHub CLI login.
+
+    Ambient GH_TOKEN/GITHUB_TOKEN values, such as the Codespaces repository token, are
+    never used: gh runs without them and therefore reads its stored login.
+    """
+    if token := environ.get("COPILOT_GITHUB_TOKEN", "").strip():
+        return token
+    gh = shutil.which("gh", path=environ.get("PATH"))
+    if gh is None:
+        raise WorkshopError(f"The GitHub CLI (gh) is missing. {SIGN_IN}")
+    child = {key: value for key, value in environ.items() if key not in {"GH_TOKEN", "GITHUB_TOKEN"}}
+    try:
+        result = subprocess.run(
+            [gh, "auth", "token", "--hostname", "github.com"],
+            env=child, capture_output=True, text=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise WorkshopError(f"Could not read the GitHub CLI login ({error}). {SIGN_IN}") from error
+    token = result.stdout.strip()
+    if result.returncode != 0 or not token:
+        raise WorkshopError(f"No GitHub CLI login found. {SIGN_IN}")
+    return token
+
+
+def copilot_home(output: Path) -> Path:
+    """The runtime's own data directory: session journals stay next to the reports."""
+    return output.resolve() / "copilot-home"
 
 
 def image_digest(path: Path, limit: int = MAX_IMAGE_BYTES) -> str:
@@ -154,6 +184,9 @@ class RunContext:
     monitor_directory: Path
     previous: Snapshot | None
     image_limit: int = MAX_IMAGE_BYTES
+    max_ai_credits: float = MAX_AI_CREDITS
+    resume_session_id: str | None = None
+    session_id: str | None = None
     navigated: bool = False
     captured_at: datetime | None = None
     inspected: dict[str, str] = field(default_factory=dict)
@@ -196,7 +229,8 @@ class RunContext:
             "working_directory": str(self.directory),
             "tools": MCP_TOOLS.copy(),
             "timeout": 45000,
-            "env": {"COPILOT_GITHUB_TOKEN": "", "GH_TOKEN": "", "GITHUB_TOKEN": ""},
+            # The browser needs no GitHub credentials, including the SDK's own token variable.
+            "env": {"COPILOT_GITHUB_TOKEN": "", "GH_TOKEN": "", "GITHUB_TOKEN": "", "COPILOT_SDK_AUTH_TOKEN": ""},
         }
 
     def validate_result(self, result: FinishRunParams) -> None:
@@ -220,16 +254,17 @@ class RunContext:
                 "Stage the final outcome after inspecting the screenshot(s). "
                 "Use baseline when no previous screenshot exists, otherwise unchanged or changed. "
                 "The host writes Markdown with local screenshot links only for changed. "
-                "After this succeeds, end your response without calling more tools."
+                "A successful call ends your turn."
             ),
             defer="never",
+            is_terminal=True,
         )
         async def finish_run(params: FinishRunParams) -> dict[str, str]:
             if self.staged is not None:
                 raise WorkshopError("This run is already finalized.")
             self.validate_result(params)
             self.staged = params
-            return {"status": "staged", "outcome": params.status, "next": "End your response."}
+            return {"status": "staged", "outcome": params.status}
 
         return finish_run
 
@@ -247,6 +282,7 @@ class RunContext:
             captured_at=self.captured_at,
             sha256=image_digest(self.after, self.image_limit),
             status=result.status,
+            session_id=self.session_id,
         )
         report = None
         if result.status == "changed":
@@ -274,7 +310,7 @@ class RunContext:
 
 
 @contextmanager
-def open_run(url: str, output: Path) -> Iterator[RunContext]:
+def open_run(url: str, output: Path, remember: bool = False) -> Iterator[RunContext]:
     url = normalize_url(url)
     capture = json.loads((ROOT / "playwright-mcp.config.json").read_text(encoding="utf-8"))
     lock = json.loads((ROOT / "package-lock.json").read_text(encoding="utf-8"))
@@ -308,6 +344,8 @@ def open_run(url: str, output: Path) -> Iterator[RunContext]:
         directory = monitor_directory / "runs" / uuid4().hex
         directory.mkdir(parents=True)
         run = RunContext(url, key, directory, monitor_directory, previous)
+        if remember and previous is not None:
+            run.resume_session_id = previous.session_id
         if old_image is not None:
             shutil.copyfile(old_image, run.before)
         yield run
