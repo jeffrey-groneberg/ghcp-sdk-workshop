@@ -332,11 +332,11 @@ The Python tests cover sign-in, tool configuration, permissions, session resume,
 
 ## References
 
-The API usage was checked against the Microsoft Copilot SDK **2.0.1** source and documentation. The workshop pins `microsoft-copilot-sdk` **2.0.1** (runtime 1.0.114) and Playwright MCP **0.0.85**; update them together only after checking the full exercise.
+The API usage was checked against the Microsoft Copilot SDK **2.0.1** source and documentation. The workshop pins `microsoft-copilot-sdk` **2.0.1** (runtime 1.0.114) and Playwright MCP **0.0.86**; update them together only after checking the full exercise.
 
 - [Python SDK](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/python/README.md), including [image support](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/python/README.md#image-support), [permission handling](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/python/README.md#permission-handling), and [session hooks](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/python/README.md#session-hooks)
 - [SDK v2 breaking changes and migration](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/v2-breaking-changes.md)
 - [MCP servers](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/features/mcp.md), [session limits](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/features/session-limits.md), [session resume and persistence](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/features/session-persistence.md), [in-process runtime](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/setup/in-process-runtime.md), and [authentication](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/auth/authenticate.md)
 - [Authenticating GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli): supported token types and the **Copilot Requests** permission
-- [Official Playwright MCP configuration and tools](https://github.com/microsoft/playwright-mcp/blob/v0.0.85/README.md)
+- [Official Playwright MCP configuration and tools](https://github.com/microsoft/playwright-mcp/blob/v0.0.86/README.md)
 - [Codespaces dev containers](https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/introduction-to-dev-containers) and [private port forwarding](https://docs.github.com/en/codespaces/developing-in-a-codespace/forwarding-ports-in-your-codespace)

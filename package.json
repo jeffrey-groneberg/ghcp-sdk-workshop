@@ -12,6 +12,6 @@
     "test:mcp": "node --test tests/mcp.test.mjs"
   },
   "dependencies": {
-    "@playwright/mcp": "0.0.85"
+    "@playwright/mcp": "0.0.86"
   }
 }
