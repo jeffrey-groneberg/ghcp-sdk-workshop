@@ -1,2 +1,2 @@
-microsoft-copilot-sdk==2.0.1
+microsoft-copilot-sdk==2.0.2
 pydantic==2.13.5

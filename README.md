@@ -159,7 +159,7 @@ async def build_session(
 - `tools`: the allow-list from step 2, plus the application's own tool. `run.finish_tool()` is a small `@define_tool` function with a Pydantic schema: `status`, `summary`, and `changes`. It is a **terminal tool** (`is_terminal=True`): a successful call ends the agent's turn, while a failed call returns the error so the model can correct itself. It never browses or compares; those decisions belong to the agent.
 - `mcp`: `run.mcp_server()` configures the **official installed `@playwright/mcp` server over stdio**. It launches Node in the run directory with the checked-in browser configuration, not a custom Python browser wrapper.
 - `permissions` and `hooks`: the guard allows only the requested navigation target and assigned image paths. It rejects unrelated files/actions and refuses to finalize a comparison until both images have actually been read. Permission checks are narrow rather than `approve_all`.
-- `execution`: an AI-credit cap for the session, marked **Experimental** in SDK 2.0.1 ("Limits applied to this session's current accounting window"). The SDK documents it as a soft cap: usage is checked after each model call, and once 10% or less remains, the runtime makes its final model call without tools. The watcher then cannot call `finish_run` and publishes nothing. The default `--max-credits 30` is the smallest limit the runtime accepts.
+- `execution`: an AI-credit cap for the session, marked **Experimental** in SDK 2.0.2 ("Limits applied to this session's current accounting window"). The SDK documents it as a soft cap: usage is checked after each model call, and once 10% or less remains, the runtime makes its final model call without tools. The watcher then cannot call `finish_run` and publishes nothing. The cap has a floor: "The value must be at least 30 and greater than the AI Credits the session has already used; a lower value is rejected." The default `--max-credits 30` is that minimum.
 
 Read the short `execute()` function in `watch.py`. Its central operation is one:
 
@@ -211,7 +211,7 @@ Artifacts: .../.webwatch/<page-key>/runs/<run-id>
 
 The order, any retries, and the cost are model-chosen. A `[blocked]` message is a guard explaining an invalid request, for example a screenshot requested in the same step as the navigation, or a `view` of a folder; the model reads the reason and corrects itself. It is not permission to disable the guard.
 
-The credits line comes from the session's usage metrics, `session.rpc.usage.get_metrics()`, an API group that the 2.0.1 source marks experimental. In our test runs with `claude-haiku-4.5`, one run cost about 3 AI credits. The session journal is the runtime's own record: open it to see the prompt, each tool call, and the usage records behind the trace.
+The credits line comes from the session's usage metrics, `session.rpc.usage.get_metrics()`, an API group that the 2.0.2 source marks experimental. In our test runs with `claude-haiku-4.5`, one run cost about 3 AI credits. The session journal is the runtime's own record: open it to see the prompt, each tool call, and the usage records behind the trace.
 
 **First run:** the agent captures and inspects the page, then records a baseline. There is no change report because there is nothing to compare yet.
 
@@ -269,7 +269,7 @@ So far, every run started a new session. Sessions are durable: the runtime journ
 python watch.py http://127.0.0.1:8000/ --remember
 ```
 
-1. Run it twice, with a page change in between, and compare the credits lines: they now show this run and the session total. The resumed session carries every earlier turn, so the agent can refer to what it saw before, and the total grows with each run.
+1. Run it twice, with a page change in between, and compare the credits lines: they now show this run and the session total. The resumed session carries every earlier turn, so the agent can refer to what it saw before, and the total grows with each run. The cap counts that total, so a long-remembered session eventually needs a fresh start (see *Troubleshooting*).
 2. Open the session journal: the same file now holds several runs, and each resumed run begins with a `session.resume` event.
 3. Read `build_session()` in `watch.py`. When the runner sets `run.resume_session_id`, the solution calls `client.resume_session(run.resume_session_id, ...)` instead of `client.create_session(...)`, with the same options. Tools, the MCP server, handlers, and the credit limit are supplied again on every resume because they belong to this run.
 4. Optional: teach your `starter.py` the same. Add `from functools import partial`, then choose the method before the call and use `await open_session(...)` with your existing keyword arguments:
@@ -319,7 +319,7 @@ Record a baseline, change the page, and run again with the other model. Its own 
 | Chromium or Linux libraries are missing | Rerun bootstrap; locally use `npm run browser:install` (Linux/WSL: append `-- --with-deps`). |
 | No `finish_run`, a blocked tool, or oversized image | Read the tool trace; check your allowlist and task, and use a smaller page if needed. Do not replace the guards with blanket approval. |
 | `Minimum session limit is 30 AI credits` | Use `--max-credits 30` or more. |
-| A remembered session stops without `finish_run` | Its credit cap may be spent. Run once without `--remember` to start a new session, or raise `--max-credits` deliberately. |
+| A remembered session stops without `finish_run`, or resuming it is rejected | The cap counts every run of the session, and the runtime rejects a cap that is not greater than the credits the session has already used. Run once without `--remember` to start a new session, or raise `--max-credits` deliberately. |
 | The Python process ends abruptly during a run | Rerun with `COPILOT_SDK_DEFAULT_CONNECTION=stdio` to host the runtime in a child process (stretch B). |
 | Run times out | The default is 180 seconds. Check browser/model errors first; use `--timeout SECONDS` deliberately if necessary. The previous baseline is preserved. |
 
@@ -337,11 +337,11 @@ The Python tests cover sign-in, tool configuration, permissions, session resume,
 
 ## References
 
-The API usage was checked against the Microsoft Copilot SDK **2.0.1** source and documentation. The workshop pins `microsoft-copilot-sdk` **2.0.1** (runtime 1.0.114) and Playwright MCP **0.0.86**; update them together only after checking the full exercise.
+The API usage was checked against the Microsoft Copilot SDK **2.0.2** source and documentation. The workshop pins `microsoft-copilot-sdk` **2.0.2** (runtime 1.0.115) and Playwright MCP **0.0.86**; update them together only after checking the full exercise.
 
-- [Python SDK](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/python/README.md), including [image support](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/python/README.md#image-support), [permission handling](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/python/README.md#permission-handling), and [session hooks](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/python/README.md#session-hooks)
-- [SDK v2 breaking changes and migration](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/v2-breaking-changes.md)
-- [MCP servers](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/features/mcp.md), [session limits](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/features/session-limits.md), [session resume and persistence](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/features/session-persistence.md), [in-process runtime](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/setup/in-process-runtime.md), and [authentication](https://github.com/microsoft/copilot-sdk/blob/v2.0.1/docs/auth/authenticate.md)
+- [Python SDK](https://github.com/microsoft/copilot-sdk/blob/v2.0.2/python/README.md), including [image support](https://github.com/microsoft/copilot-sdk/blob/v2.0.2/python/README.md#image-support), [permission handling](https://github.com/microsoft/copilot-sdk/blob/v2.0.2/python/README.md#permission-handling), and [session hooks](https://github.com/microsoft/copilot-sdk/blob/v2.0.2/python/README.md#session-hooks)
+- [SDK v2 breaking changes and migration](https://github.com/microsoft/copilot-sdk/blob/v2.0.2/docs/v2-breaking-changes.md)
+- [MCP servers](https://github.com/microsoft/copilot-sdk/blob/v2.0.2/docs/features/mcp.md), [session limits](https://github.com/microsoft/copilot-sdk/blob/v2.0.2/docs/features/session-limits.md), [session resume and persistence](https://github.com/microsoft/copilot-sdk/blob/v2.0.2/docs/features/session-persistence.md), [in-process runtime](https://github.com/microsoft/copilot-sdk/blob/v2.0.2/docs/setup/in-process-runtime.md), and [authentication](https://github.com/microsoft/copilot-sdk/blob/v2.0.2/docs/auth/authenticate.md)
 - [Authenticating GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli): supported token types and the **Copilot Requests** permission
 - [Official Playwright MCP configuration and tools](https://github.com/microsoft/playwright-mcp/blob/v0.0.86/README.md)
 - [Codespaces dev containers](https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/introduction-to-dev-containers) and [private port forwarding](https://docs.github.com/en/codespaces/developing-in-a-codespace/forwarding-ports-in-your-codespace)
