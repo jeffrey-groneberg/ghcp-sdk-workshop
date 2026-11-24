@@ -1,11 +1,12 @@
 {
-  "name": "Copilot SDK page watcher workshop",
+  "name": "Microsoft Copilot SDK page watcher workshop",
   "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
   "features": {
     "ghcr.io/devcontainers/features/node:2": {
       "version": "22",
       "pnpmVersion": "none"
-    }
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "containerUser": "vscode",
   "remoteUser": "vscode",

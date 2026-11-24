@@ -4,9 +4,6 @@ trap 'status=$?; printf >&2 "\nWorkshop setup failed (exit %s, line %s).\n" "$st
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-# Use the required npm registry fallback only for setup and its child processes.
-export npm_config_registry=https://packagefeedproxy.microsoft.io/npm/
-
 printf '\nInstalling the pinned Python dependencies...\n'
 python3 -m venv .venv
 .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
@@ -18,7 +15,9 @@ printf '\nInstalling matching Chromium and its Linux system libraries...\n'
 # Playwright uses the dev container user's normal sudo access for OS packages.
 npm run browser:install -- --with-deps
 
-printf '\nPrefetching the Copilot SDK runtime (no sign-in or model request)...\n'
-.venv/bin/python -m copilot download-runtime
+printf '\nPrefetching the Microsoft Copilot SDK runtime (no sign-in or model request)...\n'
+.venv/bin/python -m copilot download-runtime --in-process
 
-printf '\nWorkshop setup complete. Start the local fixture with: npm run demo\n'
+printf '\nWorkshop setup complete. Sign in with your own account:\n'
+printf '  env -u GITHUB_TOKEN -u GH_TOKEN gh auth login --web --git-protocol https\n'
+printf 'Then start the local fixture with: npm run demo\n'
