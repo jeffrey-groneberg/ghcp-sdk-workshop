@@ -2,7 +2,7 @@
   "name": "copilot-page-watch-workshop",
   "version": "1.0.0",
   "private": true,
-  "description": "An autonomous webpage watcher built with the GitHub Copilot SDK",
+  "description": "An autonomous webpage watcher built with the Microsoft Copilot SDK",
   "engines": {
     "node": ">=22"
   },
@@ -12,7 +12,6 @@
     "test:mcp": "node --test tests/mcp.test.mjs"
   },
   "dependencies": {
-    "@github/copilot": "1.0.83",
-    "@playwright/mcp": "0.0.81"
+    "@playwright/mcp": "0.0.85"
   }
 }

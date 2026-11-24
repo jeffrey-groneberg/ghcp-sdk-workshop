@@ -20,6 +20,7 @@
     }
   },
   "imageResponses": "omit",
+  "webmcp": false,
   "codegen": "none",
   "timeouts": {
     "action": 10000,
